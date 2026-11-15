@@ -5,8 +5,14 @@
   const P = window.TinefulPitch;
   const $ = (id) => document.getElementById(id);
   const N = 17;
-  const HOLD_MS = 650;          // how long a tine must stay in tune before it counts
-  const CLARITY = 0.75;         // minimum periodicity to trust a reading
+  const CLARITY = 0.75;         // minimum periodicity to trust the start of a note
+  const CLARITY_TAIL = 0.6;     // ...and while following a note that is already known
+  const TAIL_GATE = 0.4;        // keep following a known note down to 40% of the normal level
+  const LINGER_MS = 8000;       // how long the last reading stays up after a note fades
+  const BLIP_MS = 120;          // one wobbly reading this short doesn't restart the in-tune count
+  // How long a tine must stay in tune before it counts: 0.6 s for the low tines,
+  // easing down to 0.3 s for the short, fast-fading high ones (1 kHz and up).
+  function holdMs(f) { const t = Math.min(1, Math.max(0, Math.log2(f / 500))); return 600 - 300 * t; }
 
   /* ---------- tunings ---------- */
   const C_MAJOR = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79, 81, 83, 84, 86, 88];
@@ -96,6 +102,8 @@
     recent: [],
     disp: 0,                // smoothed cents for the meter
     inTuneSince: 0,
+    outSince: 0,
+    last: null,             // the reading from the note that just faded: { ...hearing, i, at }
     lastPitchAt: 0,
     muteUntil: 0,
     playingUntil: 0,
@@ -151,6 +159,10 @@
     S.hearing = null;
     S.recent.length = 0;
     S.inTuneSince = 0;
+    S.outSince = 0;
+  }
+  function rememberLast(now) {
+    if (S.hearing) S.last = Object.assign({}, S.hearing, { i: S.current, at: now });
   }
   const median = (arr) => { const a = arr.slice().sort((x, y) => x - y); return a[a.length >> 1]; };
 
@@ -160,11 +172,17 @@
     const r = A.det.detect(A.buf);
     const periodic = r.freq > 0 && r.clarity >= CLARITY;
     const gate = Math.max(SENS[settings.sensitivity] || SENS.normal, A.noise * 2.5);
-    if (periodic && r.rms >= gate && !isIgnored(r.freq, now)) {
+    // Once a note is being followed, keep following it into its quiet tail,
+    // as long as it is still the same note.
+    const following = S.recent.length > 0 && r.freq > 0 && Math.abs(P.cents(r.freq, median(S.recent))) < 35;
+    const ok = following
+      ? r.clarity >= CLARITY_TAIL && r.rms >= gate * TAIL_GATE
+      : periodic && r.rms >= gate;
+    if (ok && !isIgnored(r.freq, now)) {
       onPitch(r.freq, now);
     } else {
       if (!periodic) A.noise = Math.min(0.05, A.noise * 0.97 + r.rms * 0.03);
-      if (now - S.lastPitchAt > 300) dropSignal();
+      if (now - S.lastPitchAt > 300) { rememberLast(now); dropSignal(); }
     }
   }
   function isIgnored(f, now) {
@@ -186,10 +204,12 @@
     S.hearing = { freq: fm, cents: c, midi: Math.round(P.freqToMidi(fm, settings.a4)) };
     if (first) S.disp = Math.max(-60, Math.min(60, c));
     if (Math.abs(c) <= settings.tolerance) {
+      S.outSince = 0;
       if (!S.inTuneSince) S.inTuneSince = now;
-      if (settings.autoAdvance && !S.celebrate && now - S.inTuneSince >= HOLD_MS) markTuned(true);
-    } else {
-      S.inTuneSince = 0;
+      if (settings.autoAdvance && !S.celebrate && now - S.inTuneSince >= holdMs(targetFreq(S.current))) markTuned(true);
+    } else if (S.inTuneSince) {
+      if (!S.outSince) S.outSince = now;
+      else if (now - S.outSince > BLIP_MS) { S.inTuneSince = 0; S.outSince = 0; }
     }
   }
 
@@ -233,6 +253,7 @@
   function selectTine(i) {
     clearTimeout(S.advanceTimer);
     S.celebrate = null;
+    S.last = null;
     S.current = i;
     S.finished = false;
     prog.current = i;
@@ -249,14 +270,17 @@
     clearTimeout(S.advanceTimer);
     S.celebrate = null;
     S.finished = true;
+    S.last = null;
     dropSignal();
     renderAll();
   }
   function markTuned(auto) {
     if (S.finished) return;
     const i = S.current, now = performance.now();
+    const reading = currentReading(now);
     prog.status[i] = 'tuned';
-    prog.cents[i] = S.hearing ? Math.round(S.hearing.cents * 10) / 10 : null;
+    prog.cents[i] = reading ? Math.round(reading.cents * 10) / 10 : null;
+    S.last = null;
     saveProgress();
     haptic();
     const wait = auto ? 1000 : 600;
@@ -277,6 +301,7 @@
   }
   function newRound() {
     prog = freshProgress();
+    S.last = null;
     S.current = sequence()[0];
     prog.current = S.current;
     S.finished = false;
@@ -352,12 +377,23 @@
     mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>'
   };
 
+  // The reading to show: the live one, or the last pluck's for a while after it fades,
+  // so there's time to read the hint before picking up the hammer.
+  function currentReading(now) {
+    if (S.hearing) return Object.assign({ live: true }, S.hearing);
+    const l = S.last;
+    if (l && l.i === S.current && S.listening && now - l.at < LINGER_MS && now >= S.playingUntil) {
+      return Object.assign({ live: false }, l);
+    }
+    return null;
+  }
   function liveState(now) {
     if (S.celebrate && now < S.celebrate.until) return 'tuned';
-    if (!S.hearing) return 'idle';
-    const a = Math.abs(S.hearing.cents);
+    const r = currentReading(now);
+    if (!r) return 'idle';
+    const a = Math.abs(r.cents);
     if (a <= settings.tolerance) return 'good';
-    return S.hearing.cents < 0 ? 'low' : 'high';
+    return r.cents < 0 ? 'low' : 'high';
   }
   function amountWords(a) {
     if (a < 12) return ['A touch', 'a hair'];
@@ -400,7 +436,9 @@
     setHTML(els.note, 'note', noteHTML(settings.notes[i]));
     setText(els.playLabel, 'play', `Play ${noteText(settings.notes[i])}`);
 
-    const h = S.hearing, tf = targetFreq(i), tol = settings.tolerance;
+    const h = currentReading(now), tf = targetFreq(i), tol = settings.tolerance;
+    const lingering = !!h && !h.live && state !== 'tuned';
+    if (cache.lingering !== lingering) { cache.lingering = lingering; tuneCard.classList.toggle('lingering', lingering); }
     // Far off, but matching another tine? Probably the wrong tine was plucked.
     const sj = h && state !== 'tuned' && Math.abs(h.cents) > 70 ? otherTineFor(h.freq) : -1;
     let offset, hearing = '', icon, title, text, clickable = false;
@@ -418,7 +456,7 @@
       icon = 'pluck'; title = `Pluck the ${lowerFirst(whereText(i))}`; text = 'Let it ring for a moment.';
     } else {
       const a = Math.abs(h.cents);
-      hearing = `Hearing ${noteText(h.midi)} at ${h.freq.toFixed(1)} Hz`;
+      hearing = `${h.live ? 'Hearing' : 'Last pluck:'} ${noteText(h.midi)} at ${h.freq.toFixed(1)} Hz`;
       if (sj >= 0) {
         offset = offsetWords(h.cents);
         icon = 'pluck'; title = 'Is that the right tine?';
@@ -426,8 +464,13 @@
       } else if (a <= tol) {
         offset = 'In tune';
         icon = 'check';
-        title = settings.autoAdvance ? 'In tune, hold on' : 'In tune';
-        text = settings.autoAdvance ? 'Let it ring a moment longer.' : 'Tap Mark as tuned to move on.';
+        if (!settings.autoAdvance) {
+          title = 'In tune'; text = 'Tap Mark as tuned to move on.';
+        } else if (h.live) {
+          title = 'In tune, hold on'; text = 'Let it ring a moment longer.';
+        } else {
+          title = 'In tune, but it faded quickly'; text = 'Pluck again to confirm it, or tap Mark as tuned.';
+        }
       } else {
         offset = offsetWords(h.cents);
         const [adj, amt] = amountWords(a);
@@ -716,6 +759,13 @@
     requestAnimationFrame(frame);
 
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+      // When a new version takes over: switch straight away if tuning hasn't started yet.
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController) return;
+        if (!$('start').hidden) location.reload();
+        else toast('Tineful was updated. The new version opens next time.');
+      });
       navigator.serviceWorker.register('sw.js').catch(() => { /* offline support unavailable */ });
     }
   }

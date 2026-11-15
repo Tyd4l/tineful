@@ -1,5 +1,5 @@
 /* Tineful service worker: keeps the app working offline. */
-const CACHE = 'tineful-v1';
+const CACHE = 'tineful-v2';
 const ASSETS = [
   './',
   'index.html',
@@ -15,7 +15,12 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // 'reload' skips the browser's HTTP cache, so a new version never stores stale files.
+  event.waitUntil(
+    caches.open(CACHE)
+      .then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {

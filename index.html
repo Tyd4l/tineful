@@ -205,7 +205,8 @@ button:focus-visible, select:focus-visible { outline: none; box-shadow: var(--fo
 }
 .hearing { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; min-height: 1.4em; }
 
-.meter { width: 112px; height: 210px; display: block; }
+.meter { width: 112px; height: 210px; display: block; transition: opacity .3s; }
+.lingering .meter { opacity: .55; }
 .meter .m-band { fill: color-mix(in srgb, var(--mint) 55%, transparent); }
 .meter .m-line { stroke: var(--mint-ink); stroke-width: 2; stroke-dasharray: 4 4; }
 .meter .m-bridge { fill: var(--bridge); }
