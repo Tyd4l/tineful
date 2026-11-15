@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ECE5F6"/>
+      <stop offset="1" stop-color="#DCD2EE"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8DDD3"/>
+      <stop offset="1" stop-color="#EFC3B5"/>
+    </linearGradient>
+    <linearGradient id="bridge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D9AE9F"/>
+      <stop offset="1" stop-color="#C08D7E"/>
+    </linearGradient>
+  </defs>
+  <rect id="plate" width="512" height="512" rx="116" fill="url(#bg)"/>
+  <rect x="104" y="108" width="304" height="300" rx="64" fill="url(#wood)"/>
+  <g stroke="#CDBFD6" stroke-width="5">
+    <rect x="152" y="140" width="28" height="150" rx="14" fill="#FBF9FD"/>
+    <rect x="196" y="140" width="28" height="186" rx="14" fill="#FBF9FD"/>
+    <rect x="288" y="140" width="28" height="186" rx="14" fill="#FBF9FD"/>
+    <rect x="332" y="140" width="28" height="150" rx="14" fill="#FBF9FD"/>
+  </g>
+  <rect x="242" y="140" width="28" height="222" rx="14" fill="#BDE8D2" stroke="#2B805B" stroke-width="5"/>
+  <rect x="136" y="160" width="240" height="24" rx="12" fill="url(#bridge)"/>
+</svg>
